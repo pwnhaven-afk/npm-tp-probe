@@ -9,33 +9,26 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: request github OIDC token (audience=npm:registry.npmjs.org)
-        env:
-          REQ_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
-          REQ_TOK: ${{ env.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+      - name: mint github OIDC token (audience npm:registry.npmjs.org) and probe npm token exchange
         run: |
-          set -e
-          echo "event_name=$GITHUB_EVENT_NAME  ref=$GITHUB_REF  base=$GITHUB_BASE_REF  head=$GITHUB_HEAD_REF"
-          URL="$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org"
-          curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$URL" -o idtoken.json
-          JWT=$(python3 -c "import json;print(json.load(open('idtoken.json'))['value'])")
-          echo "got_jwt=${#JWT}"
-          python3 - "$JWT" <<'PY'
-import sys,base64,json
-p=sys.argv[1].split('.')[1]; p+='='*(-len(p)%4)
-c=json.loads(base64.urlsafe_b64decode(p))
-for k in ['iss','aud','sub','ref','ref_type','event_name','repository','repository_owner_id','repository_id','workflow_ref','job_workflow_ref','environment','sha']:
-    if k in c: print(f"  {k} = {c[k]}")
-PY
-          echo "--- token exchange attempt: @solana/kit ---"
-          curl -sS -o resp.json -w "HTTP %{http_code}\n" -X POST \
-            -H "Authorization: Bearer $JWT" \
-            -H "Accept: application/json" \
-            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@solana%2fkit" || true
-          head -c 800 resp.json; echo
-          echo "--- token exchange attempt: @solana/wallet-adapter-base ---"
-          curl -sS -o resp2.json -w "HTTP %{http_code}\n" -X POST \
-            -H "Authorization: Bearer $JWT" \
-            -H "Accept: application/json" \
-            "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@solana%2fwallet-adapter-base" || true
-          head -c 800 resp2.json; echo
+          set -u
+          echo "event_name=$GITHUB_EVENT_NAME"
+          echo "ref=$GITHUB_REF"
+          echo "base_ref=$GITHUB_BASE_REF head_ref=$GITHUB_HEAD_REF"
+          echo "id_token_url_present=$([ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] && echo yes || echo no)"
+          URL="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org"
+          curl -sS -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "$URL" -o idtoken.json
+          JWT=$(jq -r .value idtoken.json)
+          echo "got_jwt_len=${#JWT}"
+          PAYLOAD=$(echo "$JWT" | cut -d. -f2 | tr '_-' '/+' | awk '{l=length($0)%4; if(l==2)print $0"=="; else if(l==3)print $0"="; else print $0}')
+          echo "--- jwt claims (subset) ---"
+          echo "$PAYLOAD" | base64 -d 2>/dev/null | jq '{iss,aud,sub,ref,ref_type,event_name,repository,repository_id,repository_owner_id,workflow_ref,job_workflow_ref,environment,sha}'
+          echo "--- exchange @solana/kit ---"
+          curl -sS -o r1.json -w "HTTP %{http_code}\n" -X POST -H "Authorization: Bearer $JWT" -H "Accept: application/json" "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@solana%2fkit"
+          head -c 600 r1.json; echo
+          echo "--- exchange @solana/wallet-adapter-base ---"
+          curl -sS -o r2.json -w "HTTP %{http_code}\n" -X POST -H "Authorization: Bearer $JWT" -H "Accept: application/json" "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@solana%2fwallet-adapter-base"
+          head -c 600 r2.json; echo
+          echo "--- exchange @solana/kit-plugins ---"
+          curl -sS -o r3.json -w "HTTP %{http_code}\n" -X POST -H "Authorization: Bearer $JWT" -H "Accept: application/json" "https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/@solana%2fkit-plugins"
+          head -c 600 r3.json; echo
