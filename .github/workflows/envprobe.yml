@@ -1,0 +1,23 @@
+name: environment branch-policy probe (pull_request ref)
+on:
+  pull_request:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  star:
+    name: env policy "*"
+    runs-on: ubuntu-latest
+    environment: envprobe-star
+    steps:
+      - run: echo "STAR_ENV_ALLOWED ref=$GITHUB_REF env=$GITHUB_ENV_NAME"
+  named:
+    name: env policy "main"
+    runs-on: ubuntu-latest
+    environment: envprobe-named
+    steps:
+      - run: echo "NAMED_ENV_ALLOWED ref=$GITHUB_REF"
+  noenv:
+    name: no environment (control)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "NOENV_ALLOWED ref=$GITHUB_REF"
