@@ -1,0 +1,31 @@
+name: merge_group OIDC channel probe
+on:
+  merge_group:
+permissions:
+  contents: read
+jobs:
+  noop:
+    name: noop
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "noop on $GITHUB_REF"
+  probe:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: check OIDC channel
+        env:
+          EVT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+        run: |
+          echo "event=$EVT"
+          echo "ref=$REF"
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then echo "OIDC_CHANNEL=present"; else echo "OIDC_CHANNEL=absent"; fi
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then echo "OIDC_RTOKEN=present"; else echo "OIDC_RTOKEN=absent"; fi
+          if [ -z "$ACTIONS_ID_TOKEN_REQUEST_URL" ]; then echo "RESULT=NO_OIDC_CHANNEL"; exit 0; fi
+          curl -sS -o /tmp/t.json -w "MINT_HTTP=%{http_code}\n" -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=npm:registry.npmjs.org" || true
+          head -c 200 /tmp/t.json; echo
+          JWT=$(jq -r .value /tmp/t.json 2>/dev/null)
+          P=$(echo "$JWT" | cut -d. -f2 | tr '_-' '/+')
+          echo "$P" | awk '{l=length($0)%4; if(l==2)print $0"=="; else if(l==3)print $0"="; else print $0}' | base64 -d 2>/dev/null | jq '{event_name,ref,sub,repository,workflow_ref,environment,job_workflow_ref}' || true
