@@ -1,0 +1,14 @@
+name: npm trusted-publishing ref probe
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  notoken:
+    runs-on: ubuntu-latest
+    steps:
+      - name: control (no id-token permission)
+        run: |
+          echo "url=${ACTIONS_ID_TOKEN_REQUEST_URL:-<unset>}"
+          echo "token=${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+set}"
